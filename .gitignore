@@ -1,0 +1,17 @@
+# Secrets — ne JAMAIS committer (utiliser .env.example comme modele)
+.env
+
+# Build Maven
+target/
+
+# IDE
+.idea/
+*.iml
+.vscode/
+
+# OS
+Thumbs.db
+.DS_Store
+
+# Claude Code
+.claude/

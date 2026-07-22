@@ -1,0 +1,42 @@
+server:
+  port: 8080
+
+spring:
+  application:
+    name: gateway
+  cloud:
+    gateway:
+      httpclient:
+        connect-timeout: 3000
+        response-timeout: 15s          # defaut pour les routes classiques
+      routes:
+        # ---- Route IA : timeout long + pas de transformation de body ----
+        - id: ai-service
+          uri: ${AI_SERVICE_URL:http://localhost:8081}
+          predicates:
+            - Path=/ai/**
+          filters:
+            - StripPrefix=1
+          metadata:
+            response-timeout: 120000    # 120 s : les streams LLM sont longs
+            connect-timeout: 3000
+
+        # ---- Exemple de route metier classique ----
+        # - id: service-commandes
+        #   uri: http://service-commandes:8080
+        #   predicates:
+        #     - Path=/commandes/**
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info,gateway,metrics
+
+# ---- Validation JWT Keycloak : a activer avec l'IdP ----
+# spring:
+#   security:
+#     oauth2:
+#       resourceserver:
+#         jwt:
+#           issuer-uri: https://keycloak.acme.local/realms/apps

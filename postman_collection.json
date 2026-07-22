@@ -1,0 +1,301 @@
+{
+  "info": {
+    "name": "LLM Platform — Gateway + ai-service + LiteLLM",
+    "description": "Requetes de test de la plateforme LLM.\n\nOrdre conseille :\n1. Sante — verifier que tout est UP\n2. LiteLLM direct — tester l'infra IA seule (master key requise)\n3. Chaine complete — passer par la Gateway comme un vrai client\n4. Validation — verifier les rejets 400\n\nVariables : gateway_url, ai_service_url, litellm_url, litellm_master_key (a renseigner depuis le .env).",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "variable": [
+    { "key": "gateway_url", "value": "http://localhost:8080" },
+    { "key": "ai_service_url", "value": "http://localhost:8081" },
+    { "key": "litellm_url", "value": "http://localhost:4000" },
+    { "key": "litellm_master_key", "value": "sk-remplacer-par-la-master-key-du-.env" }
+  ],
+  "item": [
+    {
+      "name": "1. Sante",
+      "item": [
+        {
+          "name": "LiteLLM — liveliness",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('LiteLLM est vivant (200)', () => pm.response.to.have.status(200));"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "url": "{{litellm_url}}/health/liveliness"
+          }
+        },
+        {
+          "name": "ai-service — actuator health",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('ai-service UP', () => {",
+                  "  pm.response.to.have.status(200);",
+                  "  pm.expect(pm.response.json().status).to.eql('UP');",
+                  "});"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "url": "{{ai_service_url}}/actuator/health"
+          }
+        },
+        {
+          "name": "Gateway — actuator health",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('Gateway UP', () => {",
+                  "  pm.response.to.have.status(200);",
+                  "  pm.expect(pm.response.json().status).to.eql('UP');",
+                  "});"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "url": "{{gateway_url}}/actuator/health"
+          }
+        }
+      ]
+    },
+    {
+      "name": "2. LiteLLM direct (infra IA)",
+      "item": [
+        {
+          "name": "Chat completion — alias gpt-fast",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('Reponse 200 avec contenu', () => {",
+                  "  pm.response.to.have.status(200);",
+                  "  const corps = pm.response.json();",
+                  "  pm.expect(corps.choices[0].message.content).to.be.a('string').and.not.empty;",
+                  "});"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Authorization", "value": "Bearer {{litellm_master_key}}" },
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"model\": \"gpt-fast\",\n  \"messages\": [\n    { \"role\": \"user\", \"content\": \"Bonjour, reponds en un mot.\" }\n  ]\n}"
+            },
+            "url": "{{litellm_url}}/v1/chat/completions"
+          }
+        },
+        {
+          "name": "Generer une cle virtuelle (ai-service)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('Cle sk-... generee', () => {",
+                  "  pm.response.to.have.status(200);",
+                  "  pm.expect(pm.response.json().key).to.match(/^sk-/);",
+                  "});",
+                  "// Copier la cle retournee dans AI_SERVICE_VIRTUAL_KEY du .env"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Authorization", "value": "Bearer {{litellm_master_key}}" },
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"key_alias\": \"ai-service\",\n  \"max_budget\": 100,\n  \"budget_duration\": \"30d\"\n}"
+            },
+            "url": "{{litellm_url}}/key/generate"
+          }
+        }
+      ]
+    },
+    {
+      "name": "3. Chaine complete (via Gateway)",
+      "item": [
+        {
+          "name": "Classification d'un ticket",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('200 et categorie du contrat', () => {",
+                  "  pm.response.to.have.status(200);",
+                  "  pm.expect(pm.response.json().categorie).to.be.oneOf(",
+                  "    ['FACTURATION', 'TECHNIQUE', 'COMMERCIAL', 'AUTRE']);",
+                  "});"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"texte\": \"Ma facture de mars comporte une erreur de TVA\"\n}"
+            },
+            "url": "{{gateway_url}}/ai/api/ai/classification"
+          }
+        },
+        {
+          "name": "Resume d'une commande (streaming SSE)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('200 et contenu recu', () => {",
+                  "  pm.response.to.have.status(200);",
+                  "  pm.expect(pm.response.text()).to.not.be.empty;",
+                  "});"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" },
+              { "key": "Accept", "value": "text/event-stream" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"texte\": \"Commande 4512 : 3 pompes centrifuges, livraison Lyon, urgence haute, client Acme Industries, montant 12 400 EUR.\"\n}"
+            },
+            "url": "{{gateway_url}}/ai/api/ai/resume"
+          }
+        },
+        {
+          "name": "Classification directe (ai-service, debug)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('200 et categorie du contrat', () => {",
+                  "  pm.response.to.have.status(200);",
+                  "  pm.expect(pm.response.json().categorie).to.be.oneOf(",
+                  "    ['FACTURATION', 'TECHNIQUE', 'COMMERCIAL', 'AUTRE']);",
+                  "});"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"texte\": \"Le serveur de production ne repond plus depuis ce matin\"\n}"
+            },
+            "url": "{{ai_service_url}}/api/ai/classification"
+          }
+        }
+      ]
+    },
+    {
+      "name": "4. Validation des entrees",
+      "item": [
+        {
+          "name": "Texte vide → 400",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('Rejet 400', () => pm.response.to.have.status(400));"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"texte\": \"\"\n}"
+            },
+            "url": "{{gateway_url}}/ai/api/ai/classification"
+          }
+        },
+        {
+          "name": "Texte > 8000 caracteres → 400",
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "exec": [
+                  "pm.variables.set('texte_long', 'x'.repeat(8001));"
+                ],
+                "type": "text/javascript"
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('Rejet 400', () => pm.response.to.have.status(400));"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"texte\": \"{{texte_long}}\"\n}"
+            },
+            "url": "{{gateway_url}}/ai/api/ai/classification"
+          }
+        }
+      ]
+    }
+  ]
+}

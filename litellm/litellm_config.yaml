@@ -1,0 +1,48 @@
+# =====================================================================
+# LiteLLM — configuration centrale
+# Les services Java ne connaissent QUE les alias (gpt-fast, gpt-smart).
+# Changer de provider = modifier ce fichier, zero redeploiement Java.
+# =====================================================================
+
+model_list:
+  # ---- alias "gpt-fast" : taches courantes (resume, classification) ----
+  - model_name: gpt-fast
+    litellm_params:
+      model: azure/gpt-4o-mini
+      api_base: os.environ/AZURE_API_BASE
+      api_key: os.environ/AZURE_API_KEY
+
+  # meme alias => membre du pool de fallback de gpt-fast
+  - model_name: gpt-fast
+    litellm_params:
+      model: mistral/mistral-small-latest
+      api_key: os.environ/MISTRAL_API_KEY
+
+  # ---- alias "gpt-smart" : taches complexes (raisonnement, redaction) ----
+  - model_name: gpt-smart
+    litellm_params:
+      model: azure/gpt-4o
+      api_base: os.environ/AZURE_API_BASE
+      api_key: os.environ/AZURE_API_KEY
+
+router_settings:
+  routing_strategy: usage-based-routing-v2
+  num_retries: 2            # retries geres ICI, pas cote Java (pas de double retry)
+  timeout: 60
+  redis_host: os.environ/REDIS_HOST
+  redis_port: os.environ/REDIS_PORT
+
+litellm_settings:
+  cache: true
+  cache_params:
+    type: redis
+    ttl: 300                # 5 min de cache sur reponses identiques
+  drop_params: true         # tolere les params non supportes par un provider
+
+general_settings:
+  master_key: os.environ/LITELLM_MASTER_KEY
+  database_url: os.environ/DATABASE_URL
+  # Les cles virtuelles par service se creent ensuite via l'API admin :
+  #   curl -X POST http://localhost:4000/key/generate \
+  #     -H "Authorization: Bearer $LITELLM_MASTER_KEY" \
+  #     -d '{"key_alias":"ai-service","max_budget":100,"budget_duration":"30d"}'
