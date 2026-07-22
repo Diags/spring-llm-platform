@@ -1,46 +1,157 @@
 # Plateforme LLM — 100% Spring : Gateway + Spring AI + LiteLLM
 
-Architecture : `Clients -> Gateway (Spring Cloud) -> services metier (Spring) -> ai-service (Spring Boot + Spring AI) -> LiteLLM -> providers (Azure, Mistral...)`
+Plateforme d'acces aux LLM pour services metier : les clients passent par une
+Gateway Spring Cloud, le `ai-service` (Spring Boot + Spring AI) porte les
+prompts, et LiteLLM centralise providers, cles, budgets, cache et fallbacks.
+
+## Architecture
+
+```mermaid
+flowchart LR
+    C["Clients<br/>(services metier, curl, Postman)"] -->|"HTTP :8080"| GW["Gateway<br/>Spring Cloud Gateway"]
+    GW -->|"/ai/** → StripPrefix"| AI["ai-service<br/>Spring Boot + Spring AI<br/>(WebFlux, :8081)"]
+    AI -->|"alias gpt-fast<br/>cle virtuelle"| LL["LiteLLM Proxy<br/>:4000"]
+    LL --> AZ["Azure OpenAI<br/>gpt-4o / gpt-4o-mini"]
+    LL --> MI["Mistral<br/>mistral-small"]
+    LL --> PG[("PostgreSQL<br/>cles virtuelles, budgets")]
+    LL --> RD[("Redis<br/>cache 5 min + routage")]
+
+    style GW fill:#6db33f,color:#fff
+    style AI fill:#6db33f,color:#fff
+    style LL fill:#2e6fd8,color:#fff
+```
+
+Principes :
+
+- **Les services Java ne connaissent que des alias** (`gpt-fast`, `gpt-smart`) —
+  changer de provider = modifier `litellm/litellm_config.yaml`, zero redeploiement.
+- **Une cle virtuelle par service appelant** : suivi des couts et budget par equipe.
+- **Retries uniquement dans LiteLLM** (`num_retries: 2`) — jamais cote Java
+  (`spring.ai.retry.max-attempts: 1`), pas de double retry.
+- **Resilience cote ai-service** : circuit breaker + time limiter (15 s) sur la
+  classification, reponse degradee `AUTRE` si toute la chaine IA est down.
+
+### Decoupage SOLID du ai-service
 
 ```
-llm-platform/
-├── docker-compose.yml          # orchestration complete
-├── .env.example                # secrets a remplir (copier en .env)
-├── litellm/
-│   └── litellm_config.yaml     # alias de modeles, fallback, cache, budgets
-├── ai-service/                 # Spring Boot + Spring AI (WebFlux)
-│   ├── pom.xml
-│   ├── Dockerfile
-│   └── src/main|test/...
-├── gateway/                    # Spring Cloud Gateway
-│   ├── pom.xml
-│   ├── Dockerfile
-│   └── src/main/resources/application.yaml
-└── scripts/
-    └── k6-streaming.js         # test de charge SSE par paliers
+com.acme.ai
+├── domain/                  # cœur metier, AUCUNE dependance technique
+│   ├── Categorie            # enum contrat + normalisation de la sortie LLM
+│   ├── ResumeService        # port (interface)
+│   └── ClassificationService# port (interface)
+├── llm/                     # adaptateurs Spring AI → LiteLLM (implementent les ports)
+│   ├── ResumeAiService
+│   └── ClassificationAiService
+└── web/                     # adaptateur HTTP
+    ├── AiController         # depend des ports, jamais de Spring AI
+    ├── GlobalExceptionHandler  # erreurs uniformes {code, message, details}
+    └── dto/                 # TexteRequete (validation), ClassificationReponse, ErreurReponse
 ```
 
-## Demarrage rapide (one-shot)
+Le sens des dependances est unique : `web → domain ← llm`. Remplacer Spring AI
+(ou LiteLLM) ne touche que `llm/` ; changer le contrat HTTP ne touche que `web/`.
+
+Toutes les erreurs de l'API sortent au meme format, sans fuite de detail interne :
+
+```json
+{ "code": "VALIDATION", "message": "Requete invalide.", "details": ["texte : ne doit pas etre vide"] }
+```
+
+## Flow d'appel
+
+### Classification (synchrone, protegee)
+
+```mermaid
+sequenceDiagram
+    autonumber
+    participant C as Client
+    participant GW as Gateway :8080
+    participant AI as ai-service :8081
+    participant LL as LiteLLM :4000
+    participant P as Provider (Azure / Mistral)
+
+    C->>GW: POST /ai/api/ai/classification {texte}
+    GW->>AI: POST /api/ai/classification (StripPrefix)
+    AI->>AI: Validation @NotBlank @Size(8000)
+    Note over AI: CircuitBreaker + TimeLimiter 15 s
+    AI->>LL: POST /v1/chat/completions<br/>model=gpt-fast + cle virtuelle
+    LL->>LL: cache Redis ? budget ? routage
+    LL->>P: appel provider (retries x2, fallback pool)
+    P-->>LL: reponse LLM
+    LL-->>AI: contenu ("FACTURATION")
+    AI->>AI: normalisation → enum Categorie<br/>(hors contrat → AUTRE)
+    AI-->>GW: 200 {"categorie":"FACTURATION"}
+    GW-->>C: 200 JSON
+    Note over AI: chaine IA down → fallback<br/>200 {"categorie":"AUTRE"} (jamais de 500)
+```
+
+### Resume (streaming SSE)
+
+```mermaid
+sequenceDiagram
+    autonumber
+    participant C as Client
+    participant GW as Gateway :8080<br/>(response-timeout 120 s)
+    participant AI as ai-service :8081
+    participant LL as LiteLLM :4000
+    participant P as Provider
+
+    C->>GW: POST /ai/api/ai/resume (Accept: text/event-stream)
+    GW->>AI: POST /api/ai/resume
+    AI->>LL: chat/completions stream=true
+    LL->>P: stream provider (timeout 60 s)
+    loop chaque token
+        P--)LL: delta
+        LL--)AI: chunk SSE
+        AI--)GW: data: token
+        GW--)C: data: token
+    end
+    Note over AI: erreur en cours de stream →<br/>"[indisponible] ..." puis fin propre
+```
+
+## Lancement one-shot (environnement inclus)
+
+Un seul script fait **tout** : verifie Docker (l'**installe s'il est absent** —
+winget sur Windows, get.docker.com sur Linux, Homebrew sur macOS), demarre le
+daemon, cree le `.env` avec des secrets aleatoires, monte l'infra IA, genere la
+cle virtuelle LiteLLM, build et demarre les services Spring, puis smoke test.
 
 ```powershell
-.\start.ps1      # Windows
-./start.sh       # Linux / macOS / Git Bash
+# Windows (PowerShell)
+.\start.ps1
 ```
 
-Le script fait tout : creation du `.env` (secrets aleatoires), infra IA,
-cle virtuelle, build des services, smoke test. Sans cle provider dans le
-`.env`, la plateforme repond en mode degrade (`AUTRE` / `[indisponible]`).
+```bash
+# Linux / macOS / Git Bash
+chmod +x start.sh && ./start.sh
+```
 
-Tests manuels : importer `postman_collection.json` dans Postman et
-renseigner la variable `litellm_master_key` depuis le `.env`.
+> Sans cle provider dans le `.env`, la plateforme demarre et repond en **mode
+> degrade** (`AUTRE` / `[indisponible]`). Pour de vraies reponses LLM :
+> renseigner `AZURE_API_KEY`+`AZURE_API_BASE` ou `MISTRAL_API_KEY` dans le
+> `.env` puis `docker compose up -d ai-service`.
 
-## Prerequis
+| Composant  | URL locale                                      |
+|------------|--------------------------------------------------|
+| Gateway    | http://localhost:8080                            |
+| ai-service | http://localhost:8081                            |
+| LiteLLM UI | http://localhost:4000/ui (login : master key du `.env`) |
 
-- Docker + Docker Compose
-- Java 21 + Maven (pour le dev local hors conteneur)
+Tests manuels : importer `postman_collection.json` dans Postman et renseigner
+la variable `litellm_master_key` depuis le `.env`.
+
+## Lancement manuel, etape par etape
+
+<details>
+<summary>Deplier si vous preferez tout faire a la main</summary>
+
+### 0. Prerequis
+
+- Docker + Docker Compose (installes automatiquement par `start.ps1`/`start.sh`)
+- Java 21 + Maven — uniquement pour le dev local hors conteneur
 - Une cle API d'au moins un provider (Azure OpenAI ou Mistral)
 
-## Etape 1 — Secrets
+### 1. Secrets
 
 ```bash
 cp .env.example .env
@@ -48,7 +159,7 @@ cp .env.example .env
 # Premier boot : mettre la master key dans AI_SERVICE_VIRTUAL_KEY (remplacee a l'etape 3)
 ```
 
-## Etape 2 — Demarrer l'infra IA seule et la verifier
+### 2. Demarrer l'infra IA seule et la verifier
 
 ```bash
 docker compose up -d postgres redis litellm
@@ -61,7 +172,7 @@ curl http://localhost:4000/v1/chat/completions \
   -d '{"model":"gpt-fast","messages":[{"role":"user","content":"Bonjour"}]}'
 ```
 
-## Etape 3 — Creer la cle virtuelle du ai-service
+### 3. Creer la cle virtuelle du ai-service
 
 ```bash
 curl -X POST http://localhost:4000/key/generate \
@@ -73,19 +184,13 @@ curl -X POST http://localhost:4000/key/generate \
 
 Chaque service appelant recoit SA cle : suivi des couts et budget par equipe.
 
-## Etape 4 — Demarrer toute la plateforme
+### 4. Demarrer toute la plateforme
 
 ```bash
 docker compose up -d --build
 ```
 
-| Composant  | URL locale             |
-|------------|------------------------|
-| Gateway    | http://localhost:8080  |
-| ai-service | http://localhost:8081  |
-| LiteLLM UI | http://localhost:4000/ui (login : master key) |
-
-## Etape 5 — Tester la chaine complete
+### 5. Tester la chaine complete
 
 ```bash
 # Classification (synchrone, avec circuit breaker + reponse degradee)
@@ -101,16 +206,22 @@ curl -N -X POST http://localhost:8080/ai/api/ai/resume \
   -d '{"texte":"Commande 4512 : 3 pompes centrifuges, livraison Lyon..."}'
 ```
 
-## Etape 6 — Tests automatises
+</details>
+
+## Tests automatises
 
 ```bash
 cd ai-service && mvn test
+# ou sans JDK local :
+docker run --rm -v "$PWD/ai-service:/build" -w /build maven:3.9-eclipse-temurin-21 mvn -B test
 ```
 
-Le test `AiControllerTest` remplace LiteLLM par WireMock (reponse OpenAI-compatible
-simulee) : il valide le contrat et le comportement sans appeler de vrai LLM.
+`AiControllerTest` remplace LiteLLM par WireMock (reponses OpenAI-compatibles
+simulees, y compris SSE et pannes) : contrat, normalisation, validation et
+degradation sont valides sans appeler de vrai LLM. `CategorieTest` couvre la
+normalisation de la sortie LLM.
 
-## Etape 7 — Benchmark
+## Benchmark
 
 ```bash
 # 1. Overhead infra pur : activer network_mock dans litellm_config.yaml
@@ -123,11 +234,18 @@ k6 run scripts/k6-streaming.js
 
 Seuils du script : TTFT P95 < 1,5 s, erreurs < 1 %.
 
-## Etape 8 — Dev local rapide (hors Docker)
+## Dev local rapide (hors Docker)
 
 ```bash
 docker compose up -d postgres redis litellm
 cd ai-service && mvn spring-boot:run   # avec spring-boot-devtools pour le hot-reload
+```
+
+## Arret / reinitialisation
+
+```bash
+docker compose down          # arret
+docker compose down -v       # arret + suppression des donnees (Postgres)
 ```
 
 ## Aller plus loin

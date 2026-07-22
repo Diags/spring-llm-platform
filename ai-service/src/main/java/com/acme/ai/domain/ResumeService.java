@@ -1,4 +1,4 @@
-package com.acme.ai;
+package com.acme.ai.domain;
 
 import reactor.core.publisher.Flux;
 

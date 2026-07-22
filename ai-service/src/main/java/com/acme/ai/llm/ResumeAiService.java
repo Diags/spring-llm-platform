@@ -1,7 +1,9 @@
-package com.acme.ai;
+package com.acme.ai.llm;
 
 import org.springframework.ai.chat.client.ChatClient;
 import org.springframework.stereotype.Service;
+
+import com.acme.ai.domain.ResumeService;
 
 import reactor.core.publisher.Flux;
 
@@ -25,7 +27,7 @@ class ResumeAiService implements ResumeService {
         this.chat = builder.build();
     }
 
-    /** Flux de tokens (streaming) — Reactor, coherent avec la Gateway. */
+    /** Flux de tokens (streaming) - Reactor, coherent avec la Gateway. */
     @Override
     public Flux<String> resumerCommande(String texte) {
         return chat.prompt()

@@ -1,7 +1,8 @@
-# ============================================================
+﻿# ============================================================
 # Lancement one-shot de la plateforme LLM (Windows / PowerShell)
 #   .\start.ps1
-# Fait tout : .env, infra IA, cle virtuelle, build, services, smoke test.
+# Fait TOUT : installe Docker si absent, .env, infra IA,
+# cle virtuelle, build, services, smoke test.
 # ============================================================
 $ErrorActionPreference = 'Stop'
 $racine = Split-Path -Parent $MyInvocation.MyCommand.Path
@@ -9,9 +10,35 @@ Set-Location $racine
 
 function Etape($msg) { Write-Host "`n==> $msg" -ForegroundColor Cyan }
 
-# ---- 0. Prerequis ----
-docker info *> $null
-if ($LASTEXITCODE -ne 0) { throw "Docker n'est pas demarre." }
+# ---- 0. Environnement : Docker installe ET demarre ----
+function Assurer-Docker {
+    docker info *> $null
+    if ($LASTEXITCODE -eq 0) { return }
+
+    if (-not (Get-Command docker -ErrorAction SilentlyContinue)) {
+        Etape "Docker absent - installation via winget"
+        if (-not (Get-Command winget -ErrorAction SilentlyContinue)) {
+            throw "winget indisponible : installer Docker Desktop manuellement (https://docs.docker.com/desktop/setup/install/windows-install/) puis relancer ce script."
+        }
+        winget install --id Docker.DockerDesktop -e --accept-source-agreements --accept-package-agreements
+        if ($LASTEXITCODE -ne 0) { throw "Echec de l'installation de Docker Desktop via winget." }
+        Write-Host "  Docker Desktop installe. Un redemarrage de session Windows peut etre necessaire (WSL2)." -ForegroundColor Yellow
+        # le PATH du process courant ne connait pas encore docker.exe
+        $env:Path = [Environment]::GetEnvironmentVariable('Path', 'Machine') + ';' + [Environment]::GetEnvironmentVariable('Path', 'User')
+    }
+
+    Etape "Demarrage de Docker Desktop (daemon arrete)"
+    $exe = Join-Path $env:ProgramFiles 'Docker\Docker\Docker Desktop.exe'
+    if (Test-Path $exe) { Start-Process $exe | Out-Null }
+    $limite = (Get-Date).AddMinutes(5)
+    do {
+        Start-Sleep -Seconds 5
+        docker info *> $null
+        if ($LASTEXITCODE -eq 0) { Write-Host "  Daemon Docker pret."; return }
+    } while ((Get-Date) -lt $limite)
+    throw "Le daemon Docker n'a pas demarre en 5 min. Premiere installation : redemarrer la session Windows puis relancer .\start.ps1."
+}
+Assurer-Docker
 
 # ---- 1. .env : cree avec des secrets aleatoires si absent ----
 $fichierEnv = Join-Path $racine '.env'
@@ -31,7 +58,7 @@ if (-not (Test-Path $fichierEnv)) {
         "AZURE_API_BASE=https://mon-instance.openai.azure.com"
         "MISTRAL_API_KEY="
     ) | Out-File $fichierEnv -Encoding utf8
-    Write-Host "  .env cree — renseigner AZURE_*/MISTRAL_API_KEY pour de vraies reponses LLM." -ForegroundColor Yellow
+    Write-Host "  .env cree - renseigner AZURE_*/MISTRAL_API_KEY pour de vraies reponses LLM." -ForegroundColor Yellow
 }
 
 $lignesEnv = Get-Content $fichierEnv
@@ -63,7 +90,7 @@ if ($cleVirtuelle -eq $masterKey -or $cleVirtuelle -match 'remplacer') {
         Set-Content $fichierEnv $contenu -Encoding utf8 -NoNewline
         Write-Host "  Cle virtuelle enregistree dans .env."
     } catch {
-        Write-Host "  Generation impossible ($_) — la master key reste utilisee (OK pour un test local)." -ForegroundColor Yellow
+        Write-Host "  Generation impossible ($_) - la master key reste utilisee (OK pour un test local)." -ForegroundColor Yellow
     }
 }
 

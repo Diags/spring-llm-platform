@@ -118,15 +118,31 @@ class AiControllerTest {
     }
 
     @Test
-    void texte_vide_rejete() {
+    void texte_vide_rejete_avec_corps_d_erreur_uniforme() {
         classifier("")
-            .expectStatus().isBadRequest();
+            .expectStatus().isBadRequest()
+            .expectBody()
+            .jsonPath("$.code").isEqualTo("VALIDATION")
+            .jsonPath("$.details[0]").value(d -> assertThat((String) d).startsWith("texte"));
     }
 
     @Test
     void texte_trop_long_rejete() {
         classifier("x".repeat(8001))
-            .expectStatus().isBadRequest();
+            .expectStatus().isBadRequest()
+            .expectBody()
+            .jsonPath("$.code").isEqualTo("VALIDATION");
+    }
+
+    @Test
+    void json_malforme_rejete_sans_detail_interne() {
+        client.post().uri("/api/ai/classification")
+              .contentType(MediaType.APPLICATION_JSON)
+              .bodyValue("{pas du json")
+              .exchange()
+              .expectStatus().isBadRequest()
+              .expectBody()
+              .jsonPath("$.code").isEqualTo("REQUETE_INVALIDE");
     }
 
     @Test

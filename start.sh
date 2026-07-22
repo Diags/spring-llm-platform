@@ -2,21 +2,62 @@
 # ============================================================
 # Lancement one-shot de la plateforme LLM (Linux / macOS / Git Bash)
 #   ./start.sh
-# Fait tout : .env, infra IA, cle virtuelle, build, services, smoke test.
+# Fait TOUT : installe Docker si absent, .env, infra IA,
+# cle virtuelle, build, services, smoke test.
 # ============================================================
 set -euo pipefail
 cd "$(dirname "$0")"
 
 etape() { printf '\n==> %s\n' "$1"; }
 
-# ---- 0. Prerequis ----
-docker info >/dev/null 2>&1 || { echo "Docker n'est pas demarre." >&2; exit 1; }
+# hex aleatoire meme sans openssl
+aleatoire() { openssl rand -hex "$1" 2>/dev/null || head -c "$1" /dev/urandom | od -An -tx1 | tr -d ' \n'; }
+
+# ---- 0. Environnement : Docker installe ET demarre ----
+assurer_docker() {
+  docker info >/dev/null 2>&1 && return
+
+  if ! command -v docker >/dev/null 2>&1; then
+    etape "Docker absent — installation"
+    case "$(uname -s)" in
+      Linux)
+        curl -fsSL https://get.docker.com | sh \
+          || { echo "Echec installation Docker (https://docs.docker.com/engine/install/)." >&2; exit 1; }
+        sudo usermod -aG docker "$USER" 2>/dev/null || true
+        echo "  Docker installe (nouveau groupe docker : reconnexion possible requise)."
+        ;;
+      Darwin)
+        command -v brew >/dev/null 2>&1 \
+          || { echo "Homebrew absent : installer Docker Desktop manuellement (https://docs.docker.com/desktop/setup/install/mac-install/)." >&2; exit 1; }
+        brew install --cask docker
+        ;;
+      *)
+        echo "OS non gere ($(uname -s)) : installer Docker manuellement puis relancer." >&2; exit 1
+        ;;
+    esac
+  fi
+
+  etape "Demarrage du daemon Docker"
+  case "$(uname -s)" in
+    Linux)  sudo systemctl start docker 2>/dev/null || sudo service docker start 2>/dev/null || true ;;
+    Darwin) open -a Docker 2>/dev/null || true ;;
+  esac
+  for i in $(seq 1 60); do
+    docker info >/dev/null 2>&1 && { echo "  Daemon Docker pret."; return; }
+    sleep 5
+  done
+  echo "Le daemon Docker n'a pas demarre en 5 min." >&2; exit 1
+}
+assurer_docker
+
+docker compose version >/dev/null 2>&1 \
+  || { echo "Le plugin docker compose est absent (https://docs.docker.com/compose/install/)." >&2; exit 1; }
 
 # ---- 1. .env : cree avec des secrets aleatoires si absent ----
 if [ ! -f .env ]; then
   etape "Creation du .env (secrets aleatoires)"
-  master_key="sk-$(openssl rand -hex 32)"
-  pg_pass="$(openssl rand -hex 16)"
+  master_key="sk-$(aleatoire 32)"
+  pg_pass="$(aleatoire 16)"
   cat > .env <<EOF
 LITELLM_MASTER_KEY=${master_key}
 POSTGRES_PASSWORD=${pg_pass}

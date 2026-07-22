@@ -1,7 +1,10 @@
-package com.acme.ai;
+package com.acme.ai.llm;
 
 import org.springframework.ai.chat.client.ChatClient;
 import org.springframework.stereotype.Service;
+
+import com.acme.ai.domain.Categorie;
+import com.acme.ai.domain.ClassificationService;
 
 /**
  * Adaptateur Spring AI du port ClassificationService.

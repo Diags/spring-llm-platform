@@ -1,14 +1,18 @@
-package com.acme.ai;
+package com.acme.ai.web;
 
 import jakarta.validation.Valid;
-import jakarta.validation.constraints.NotBlank;
-import jakarta.validation.constraints.Size;
 
 import org.springframework.http.MediaType;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
+
+import com.acme.ai.domain.Categorie;
+import com.acme.ai.domain.ClassificationService;
+import com.acme.ai.domain.ResumeService;
+import com.acme.ai.web.dto.ClassificationReponse;
+import com.acme.ai.web.dto.TexteRequete;
 
 import io.github.resilience4j.circuitbreaker.annotation.CircuitBreaker;
 import io.github.resilience4j.timelimiter.annotation.TimeLimiter;
@@ -27,10 +31,6 @@ import reactor.core.scheduler.Schedulers;
 @RequestMapping("/api/ai")
 public class AiController {
 
-    /** Taille bornee : protege le budget LLM et la latence contre les payloads geants. */
-    public record TexteRequete(@NotBlank @Size(max = 8000) String texte) {}
-    public record Classification(String categorie) {}
-
     private final ResumeService resume;
     private final ClassificationService classification;
 
@@ -41,7 +41,7 @@ public class AiController {
 
     /**
      * Streaming SSE : chaque token part vers l'appelant des qu'il arrive.
-     * Pas de TimeLimiter ici — un stream legitime peut durer plus de 60 s,
+     * Pas de TimeLimiter ici - un stream legitime peut durer plus de 60 s,
      * c'est le timeout LiteLLM (60 s cote provider) qui protege.
      */
     @PostMapping(value = "/resume", produces = MediaType.TEXT_EVENT_STREAM_VALUE)
@@ -53,19 +53,19 @@ public class AiController {
     /**
      * Appel synchrone court : circuit breaker + timeout + reponse degradee.
      * Si LiteLLM (et donc tous ses fallbacks providers) est down,
-     * on repond AUTRE plutot qu'une 500 — le metier decide quoi en faire.
+     * on repond AUTRE plutot qu'une 500 - le metier decide quoi en faire.
      */
     @PostMapping(value = "/classification", produces = MediaType.APPLICATION_JSON_VALUE)
     @CircuitBreaker(name = "litellm", fallbackMethod = "classificationDegradee")
     @TimeLimiter(name = "litellm")
-    public Mono<Classification> classifier(@Valid @RequestBody TexteRequete requete) {
+    public Mono<ClassificationReponse> classifier(@Valid @RequestBody TexteRequete requete) {
         return Mono.fromCallable(() -> classification.classifierTicket(requete.texte()))
                    .subscribeOn(Schedulers.boundedElastic())
-                   .map(categorie -> new Classification(categorie.name()));
+                   .map(categorie -> new ClassificationReponse(categorie.name()));
     }
 
     @SuppressWarnings("unused")
-    private Mono<Classification> classificationDegradee(TexteRequete requete, Throwable cause) {
-        return Mono.just(new Classification(Categorie.AUTRE.name()));
+    private Mono<ClassificationReponse> classificationDegradee(TexteRequete requete, Throwable cause) {
+        return Mono.just(new ClassificationReponse(Categorie.AUTRE.name()));
     }
 }
