@@ -260,6 +260,34 @@ Sequence d'un appel de classification :
                             X  jamais transmis a LiteLLM : zero token, zero cout.
 ```
 
+### Dossier 5 — Quota jusqu'au blocage (a lancer avec le Collection Runner)
+
+Prerequis : renseigner la variable de collection `ai_service_virtual_key`
+(valeur `AI_SERVICE_VIRTUAL_KEY` du `.env`).
+
+```
+ 1. Spend actuel (avant)      GET /key/info          --> spend / max_budget
+
+ 2. Consommer le quota        POST via Gateway       Run folder, requete 2 seule,
+    (texte UNIQUE par         (cle virtuelle,        Iterations: 30, Delay: 500 ms
+     iteration : le cache      quota 0.001 USD)
+     Redis ne sert a rien)
+                                     |
+        iteration  1..N :  {"categorie":"FACTURATION"}   quota disponible
+        iteration  N+1.. : {"categorie":"AUTRE"}         QUOTA EPUISE
+                                                          (mode degrade, jamais de 500)
+
+ 3. Constater le blocage      POST /v1/chat/completions avec la CLE VIRTUELLE
+                              --> 4xx ExceededBudget : l'erreur brute que
+                                  recoit le ai-service derriere son fallback
+
+ 4. Rearmer le quota          POST /key/update {"spend": 0.0}  (master key)
+```
+
+Le point cle a observer : cote client, l'epuisement du quota ne produit
+JAMAIS d'erreur — la chaine repond 200 avec la categorie degradee `AUTRE`,
+pendant que LiteLLM bloque reellement les appels providers (etape 3).
+
 ## Lancement manuel, etape par etape
 
 <details>

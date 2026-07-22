@@ -8,7 +8,8 @@
     { "key": "gateway_url", "value": "http://localhost:8080" },
     { "key": "ai_service_url", "value": "http://localhost:8081" },
     { "key": "litellm_url", "value": "http://localhost:4000" },
-    { "key": "litellm_master_key", "value": "sk-remplacer-par-la-master-key-du-.env" }
+    { "key": "litellm_master_key", "value": "sk-remplacer-par-la-master-key-du-.env" },
+    { "key": "ai_service_virtual_key", "value": "sk-remplacer-par-AI_SERVICE_VIRTUAL_KEY-du-.env" }
   ],
   "item": [
     {
@@ -293,6 +294,161 @@
               "raw": "{\n  \"texte\": \"{{texte_long}}\"\n}"
             },
             "url": "{{gateway_url}}/ai/api/ai/classification"
+          }
+        }
+      ]
+    },
+    {
+      "name": "5. Quota jusqu'au blocage (Collection Runner)",
+      "description": "Demonstration du blocage de quota (max_budget 0.001 USD).\n\nMode d'emploi :\n1. Renseigner la variable ai_service_virtual_key (valeur AI_SERVICE_VIRTUAL_KEY du .env)\n2. Requete 1 : noter le spend de depart\n3. Clic droit sur ce dossier -> Run folder -> ne cocher QUE la requete 2 -> Iterations: 30, Delay: 500 ms -> Run\n   (chaque iteration envoie un texte UNIQUE : le cache Redis ne sert a rien, chaque appel coute des tokens)\n4. Observer dans les resultats le passage de FACTURATION -> AUTRE (mode degrade = quota epuise)\n5. Requete 3 : voir l'erreur brute ExceededBudget que LiteLLM renvoie au ai-service\n6. Requete 4 : rearmer le quota (spend remis a 0)",
+      "item": [
+        {
+          "name": "1. Spend actuel de la cle (avant)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('Infos cle recuperees', () => pm.response.to.have.status(200));",
+                  "const info = pm.response.json().info || pm.response.json();",
+                  "console.log(`Spend actuel : ${info.spend} / max_budget : ${info.max_budget} USD`);"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [
+              { "key": "Authorization", "value": "Bearer {{litellm_master_key}}" }
+            ],
+            "url": {
+              "raw": "{{litellm_url}}/key/info?key={{ai_service_virtual_key}}",
+              "host": ["{{litellm_url}}"],
+              "path": ["key", "info"],
+              "query": [
+                { "key": "key", "value": "{{ai_service_virtual_key}}" }
+              ]
+            }
+          }
+        },
+        {
+          "name": "2. Consommer le quota (lancer en boucle x30)",
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "exec": [
+                  "// Texte UNIQUE a chaque iteration : le cache Redis (5 min) ne peut pas servir,",
+                  "// chaque appel part reellement vers le provider et consomme le quota.",
+                  "const unique = `${Date.now()}-${Math.floor(Math.random() * 1e6)}`;",
+                  "pm.variables.set('texte_unique',",
+                  "  `Ticket ${unique} : ma facture comporte une erreur de TVA sur la ligne ${Math.floor(Math.random() * 1000)}`);"
+                ],
+                "type": "text/javascript"
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('Toujours 200, meme quota epuise (reponse degradee)', () =>",
+                  "  pm.response.to.have.status(200));",
+                  "const categorie = pm.response.json().categorie;",
+                  "pm.test('Categorie du contrat', () =>",
+                  "  pm.expect(categorie).to.be.oneOf(['FACTURATION', 'TECHNIQUE', 'COMMERCIAL', 'AUTRE']));",
+                  "if (categorie === 'AUTRE') {",
+                  "  console.warn(`Iteration ${pm.info.iteration + 1} : AUTRE -> quota probablement epuise (mode degrade actif)`);",
+                  "} else {",
+                  "  console.log(`Iteration ${pm.info.iteration + 1} : ${categorie} -> quota encore disponible`);",
+                  "}"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"texte\": \"{{texte_unique}}\"\n}"
+            },
+            "url": "{{gateway_url}}/ai/api/ai/classification"
+          }
+        },
+        {
+          "name": "3. Constater le blocage (erreur brute LiteLLM)",
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "exec": [
+                  "pm.variables.set('mot_unique', `mot-${Date.now()}`);"
+                ],
+                "type": "text/javascript"
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "// Avec la CLE VIRTUELLE (celle du ai-service), sans passer par la chaine :",
+                  "// - quota restant  -> 200 avec une completion",
+                  "// - quota epuise   -> 4xx avec le message ExceededBudget",
+                  "if (pm.response.code === 200) {",
+                  "  console.log('Quota encore disponible : le LLM a repondu.');",
+                  "} else {",
+                  "  const erreur = pm.response.json().error || {};",
+                  "  console.warn(`Bloque par LiteLLM (${pm.response.code}) : ${erreur.message}`);",
+                  "  pm.test('Blocage budget explicite', () =>",
+                  "    pm.expect(JSON.stringify(erreur)).to.match(/budget|Budget/));",
+                  "}"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Authorization", "value": "Bearer {{ai_service_virtual_key}}" },
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"model\": \"gpt-fast\",\n  \"messages\": [\n    { \"role\": \"user\", \"content\": \"Repete ce mot : {{mot_unique}}\" }\n  ]\n}"
+            },
+            "url": "{{litellm_url}}/v1/chat/completions"
+          }
+        },
+        {
+          "name": "4. Rearmer le quota (spend = 0)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('Quota rearme', () => pm.response.to.have.status(200));",
+                  "console.log('Spend remis a 0 : la cle virtuelle fonctionne de nouveau.');"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Authorization", "value": "Bearer {{litellm_master_key}}" },
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"key\": \"{{ai_service_virtual_key}}\",\n  \"spend\": 0.0\n}"
+            },
+            "url": "{{litellm_url}}/key/update"
           }
         }
       ]
