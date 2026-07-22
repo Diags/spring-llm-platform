@@ -1,3 +1,6 @@
+# Nom de projet fixe : conteneurs/volumes stables quel que soit le nom du dossier
+name: spring-llm-platform
+
 services:
 
   postgres:

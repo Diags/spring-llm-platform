@@ -63,11 +63,12 @@ LITELLM_MASTER_KEY=${master_key}
 POSTGRES_PASSWORD=${pg_pass}
 # Remplacee automatiquement par une cle virtuelle au premier lancement
 AI_SERVICE_VIRTUAL_KEY=${master_key}
+OPENAI_API_KEY=
 AZURE_API_KEY=
 AZURE_API_BASE=https://mon-instance.openai.azure.com
 MISTRAL_API_KEY=
 EOF
-  echo "  .env cree — renseigner AZURE_*/MISTRAL_API_KEY pour de vraies reponses LLM."
+  echo "  .env cree — renseigner OPENAI_API_KEY (ou AZURE_*/MISTRAL_API_KEY) pour de vraies reponses LLM."
 fi
 
 master_key="$(grep '^LITELLM_MASTER_KEY=' .env | cut -d= -f2-)"
@@ -79,7 +80,7 @@ docker compose up -d postgres redis litellm
 
 etape "Attente de LiteLLM (healthcheck)"
 for i in $(seq 1 60); do
-  etat="$(docker inspect --format '{{.State.Health.Status}}' litelmm-gatewaye-litellm-1 2>/dev/null || echo starting)"
+  etat="$(docker inspect --format '{{.State.Health.Status}}' spring-llm-platform-litellm-1 2>/dev/null || echo starting)"
   [ "$etat" = "healthy" ] && break
   [ "$i" = 60 ] && { echo "LiteLLM n'est pas healthy apres 3 min (docker compose logs litellm)." >&2; exit 1; }
   sleep 3
@@ -107,7 +108,7 @@ docker compose up -d --build ai-service gateway
 
 etape "Attente de la gateway (healthcheck)"
 for i in $(seq 1 100); do
-  etat="$(docker inspect --format '{{.State.Health.Status}}' litelmm-gatewaye-gateway-1 2>/dev/null || echo starting)"
+  etat="$(docker inspect --format '{{.State.Health.Status}}' spring-llm-platform-gateway-1 2>/dev/null || echo starting)"
   [ "$etat" = "healthy" ] && break
   [ "$i" = 100 ] && { echo "Gateway pas healthy apres 5 min (docker compose logs gateway)." >&2; exit 1; }
   sleep 3

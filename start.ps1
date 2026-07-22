@@ -54,11 +54,12 @@ if (-not (Test-Path $fichierEnv)) {
         "POSTGRES_PASSWORD=$pgPass"
         "# Remplacee automatiquement par une cle virtuelle au premier lancement"
         "AI_SERVICE_VIRTUAL_KEY=$masterKey"
+        "OPENAI_API_KEY="
         "AZURE_API_KEY="
         "AZURE_API_BASE=https://mon-instance.openai.azure.com"
         "MISTRAL_API_KEY="
     ) | Out-File $fichierEnv -Encoding utf8
-    Write-Host "  .env cree - renseigner AZURE_*/MISTRAL_API_KEY pour de vraies reponses LLM." -ForegroundColor Yellow
+    Write-Host "  .env cree - renseigner OPENAI_API_KEY (ou AZURE_*/MISTRAL_API_KEY) pour de vraies reponses LLM." -ForegroundColor Yellow
 }
 
 $lignesEnv = Get-Content $fichierEnv
@@ -74,7 +75,7 @@ Etape "Attente de LiteLLM (healthcheck)"
 $limite = (Get-Date).AddMinutes(3)
 do {
     Start-Sleep -Seconds 3
-    $etat = docker inspect --format '{{.State.Health.Status}}' litelmm-gatewaye-litellm-1
+    $etat = docker inspect --format '{{.State.Health.Status}}' spring-llm-platform-litellm-1
     if ((Get-Date) -gt $limite) { throw "LiteLLM n'est pas devenu healthy en 3 min (docker compose logs litellm)." }
 } while ($etat -ne 'healthy')
 Write-Host "  LiteLLM healthy."
@@ -103,7 +104,7 @@ Etape "Attente de la gateway (healthcheck)"
 $limite = (Get-Date).AddMinutes(5)
 do {
     Start-Sleep -Seconds 3
-    $etat = docker inspect --format '{{.State.Health.Status}}' litelmm-gatewaye-gateway-1
+    $etat = docker inspect --format '{{.State.Health.Status}}' spring-llm-platform-gateway-1
     if ((Get-Date) -gt $limite) { throw "La gateway n'est pas devenue healthy en 5 min (docker compose logs gateway)." }
 } while ($etat -ne 'healthy')
 
