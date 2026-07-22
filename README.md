@@ -248,6 +248,43 @@ docker compose down          # arret
 docker compose down -v       # arret + suppression des donnees (Postgres)
 ```
 
+## Utiliser ce projet comme fondation
+
+Ce depot est concu comme une **base de depart** pour toute solution
+« services metier + LLM ». Les conventions a respecter en l'etendant :
+
+| Convention | Ou / comment |
+|---|---|
+| Un port (interface) par cas d'usage | `domain/` — aucune dependance technique |
+| Prompts versionnes avec le code | `llm/` uniquement, classes package-private |
+| Vocabulaire metier en entree, jamais de prompt | `web/` (contrat HTTP) |
+| Entrees validees et bornees | Bean Validation sur les DTOs (`@NotBlank`, `@Size`) |
+| Erreurs uniformes `{code, message, details}` | `GlobalExceptionHandler` — rien d'autre ne sort |
+| Resilience a la frontiere | CircuitBreaker/TimeLimiter sur le controleur, fallback degrade |
+| Retries dans LiteLLM seulement | `spring.ai.retry.max-attempts: 1`, `num_retries` dans litellm_config |
+| Un `ChatClient` unique | `config/ChatClientConfig` — defaults/advisors en un seul endroit |
+| Alias de modeles, jamais de provider | `litellm_config.yaml` (`gpt-fast`, `gpt-smart`) |
+
+### Ajouter un cas d'usage IA en 4 etapes (ex. traduction)
+
+```text
+1. domain/  TraductionService.java          → interface : String traduire(String texte, String langue)
+2. llm/     TraductionAiService.java        → @Service package-private, prompt + ChatClient injecte
+3. web/     endpoint dans AiController (ou nouveau controleur) + DTO valide
+4. test/    stub WireMock + assertions de contrat (voir AiControllerTest)
+```
+
+Aucun autre fichier a toucher : ni la gateway (route `/ai/**` deja en place),
+ni docker-compose, ni LiteLLM (sauf nouvel alias de modele).
+
+### Qualite continue
+
+- **CI GitHub Actions** (`.github/workflows/ci.yml`) : tests ai-service,
+  build gateway, build des images Docker a chaque push/PR.
+- **`.editorconfig`** : conventions d'indentation/encodage partagees
+  (attention : les `.ps1` restent en UTF-8 **avec BOM**).
+- Tests sans vrai LLM (WireMock) : rapides, deterministes, gratuits.
+
 ## Aller plus loin
 
 - **Keycloak / OIDC** : decommenter les blocs marques dans les deux `pom.xml`

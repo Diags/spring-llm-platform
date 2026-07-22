@@ -20,8 +20,8 @@ class ClassificationAiService implements ClassificationService {
 
     private final ChatClient chat;
 
-    ClassificationAiService(ChatClient.Builder builder) {
-        this.chat = builder.build();
+    ClassificationAiService(ChatClient chat) {
+        this.chat = chat;
     }
 
     /** Appel synchrone court, reponse complete. */

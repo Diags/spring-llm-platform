@@ -23,8 +23,8 @@ class ResumeAiService implements ResumeService {
 
     private final ChatClient chat;
 
-    ResumeAiService(ChatClient.Builder builder) {
-        this.chat = builder.build();
+    ResumeAiService(ChatClient chat) {
+        this.chat = chat;
     }
 
     /** Flux de tokens (streaming) - Reactor, coherent avec la Gateway. */
