@@ -81,11 +81,11 @@ Write-Host "  LiteLLM healthy."
 
 # ---- 3. Cle virtuelle du ai-service (si la master key est encore utilisee) ----
 if ($cleVirtuelle -eq $masterKey -or $cleVirtuelle -match 'remplacer') {
-    Etape "Generation de la cle virtuelle ai-service (budget 100 / 30d)"
+    Etape "Generation de la cle virtuelle ai-service (quota 0.001 USD, seuil 0.0009 USD, 30d)"
     try {
         $reponse = Invoke-RestMethod -Method Post -Uri 'http://localhost:4000/key/generate' `
             -Headers @{ Authorization = "Bearer $masterKey" } -ContentType 'application/json' `
-            -Body '{"key_alias":"ai-service","max_budget":100,"budget_duration":"30d"}'
+            -Body '{"key_alias":"ai-service","max_budget":0.001,"soft_budget":0.0009,"budget_duration":"30d"}'
         $contenu = (Get-Content $fichierEnv -Raw) -replace [regex]::Escape("AI_SERVICE_VIRTUAL_KEY=$cleVirtuelle"), "AI_SERVICE_VIRTUAL_KEY=$($reponse.key)"
         Set-Content $fichierEnv $contenu -Encoding utf8 -NoNewline
         Write-Host "  Cle virtuelle enregistree dans .env."

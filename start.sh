@@ -88,11 +88,11 @@ echo "  LiteLLM healthy."
 
 # ---- 3. Cle virtuelle du ai-service (si la master key est encore utilisee) ----
 if [ "$cle_virtuelle" = "$master_key" ] || printf '%s' "$cle_virtuelle" | grep -q remplacer; then
-  etape "Generation de la cle virtuelle ai-service (budget 100 / 30d)"
+  etape "Generation de la cle virtuelle ai-service (quota 0.001 USD, seuil 0.0009 USD, 30d)"
   if nouvelle_cle="$(curl -sf -X POST http://localhost:4000/key/generate \
         -H "Authorization: Bearer ${master_key}" \
         -H "Content-Type: application/json" \
-        -d '{"key_alias":"ai-service","max_budget":100,"budget_duration":"30d"}' \
+        -d '{"key_alias":"ai-service","max_budget":0.001,"soft_budget":0.0009,"budget_duration":"30d"}' \
         | sed -n 's/.*"key"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p')" && [ -n "$nouvelle_cle" ]; then
     sed -i.bak "s|^AI_SERVICE_VIRTUAL_KEY=.*|AI_SERVICE_VIRTUAL_KEY=${nouvelle_cle}|" .env && rm -f .env.bak
     echo "  Cle virtuelle enregistree dans .env."

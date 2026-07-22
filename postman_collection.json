@@ -134,7 +134,7 @@
             ],
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"key_alias\": \"ai-service\",\n  \"max_budget\": 100,\n  \"budget_duration\": \"30d\"\n}"
+              "raw": "{\n  \"key_alias\": \"ai-service\",\n  \"max_budget\": 0.001,\n  \"soft_budget\": 0.0009,\n  \"budget_duration\": \"30d\"\n}"
             },
             "url": "{{litellm_url}}/key/generate"
           }

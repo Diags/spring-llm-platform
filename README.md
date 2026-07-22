@@ -178,11 +178,21 @@ curl http://localhost:4000/v1/chat/completions \
 curl -X POST http://localhost:4000/key/generate \
   -H "Authorization: Bearer $LITELLM_MASTER_KEY" \
   -H "Content-Type: application/json" \
-  -d '{"key_alias":"ai-service","max_budget":100,"budget_duration":"30d"}'
+  -d '{"key_alias":"ai-service","max_budget":0.001,"soft_budget":0.0009,"budget_duration":"30d"}'
 # Copier la cle "sk-..." retournee dans AI_SERVICE_VIRTUAL_KEY du .env
 ```
 
 Chaque service appelant recoit SA cle : suivi des couts et budget par equipe.
+
+- `max_budget` **0.001 USD** : quota dur — au-dela, LiteLLM bloque la cle
+  (erreur `ExceededBudget`, le ai-service repond alors en mode degrade).
+- `soft_budget` **0.0009 USD** : seuil d'alerte — LiteLLM signale le
+  depassement (webhook/Slack si l'alerting est configure) sans bloquer.
+- Le compteur se remet a zero tous les `budget_duration` (30 jours).
+- Suivi en direct : LiteLLM UI → Virtual Keys, ou `GET /key/info`.
+
+> Valeurs volontairement minuscules pour DEMONTRER le blocage de quota des
+> les premiers appels : en usage reel, ajuster aux couts de l'equipe.
 
 ### 4. Demarrer toute la plateforme
 
