@@ -140,6 +140,126 @@ chmod +x start.sh && ./start.sh
 Tests manuels : importer `postman_collection.json` dans Postman et renseigner
 la variable `litellm_master_key` depuis le `.env`.
 
+## Ce que testent les requetes Postman (schemas)
+
+### Dossier 1 — Sante : chaque composant interroge SEUL, sans chaine
+
+```
+ Postman
+   |-- GET :4000/health/liveliness  --> LiteLLM      --> "I'm alive!"
+   |-- GET :8081/actuator/health    --> ai-service   --> {"status":"UP"}
+   |-- GET :8080/actuator/health    --> Gateway      --> {"status":"UP"}
+
+ Si l'un echoue : le probleme est DANS ce composant (pas dans la chaine).
+```
+
+### Dossier 2 — LiteLLM direct : l'infra IA seule, avec la MASTER KEY
+
+```
+ Postman ---- Authorization: Bearer {{litellm_master_key}} ----> LITELLM :4000
+    |                                                               |
+    |  POST /v1/chat/completions                                    |
+    |       {"model":"gpt-fast", "messages":[...]}                  |----> OpenAI
+    |  <--- reponse OpenAI-compatible (choices, usage, tokens) <----|
+    |                                                               |
+    |  POST /key/generate                                           |
+    |       {"key_alias":"...","max_budget":0.001,                  |  (pas d'appel
+    |        "soft_budget":0.0009,"budget_duration":"30d"}          |   LLM : admin)
+    |  <--- {"key":"sk-..."} nouvelle cle virtuelle budgetee        |
+
+ Court-circuite Gateway et ai-service : valide l'infra IA isolement.
+ La master key n'est PAS decomptee du quota de la cle virtuelle.
+ NB : /key/generate echoue si l'alias existe deja (alias unique) —
+      c'est le modele a copier pour creer la cle d'un AUTRE service.
+```
+
+### Dossier 3 — Chaine complete : le parcours reel d'un service metier
+
+```
+ Postman / service metier
+      |
+      |  POST /ai/api/ai/classification        {"texte":"Ma facture..."}
+      |  POST /ai/api/ai/resume  (SSE)
+      v
++---------------+     StripPrefix /ai      +----------------------------+
+|    GATEWAY    | -----------------------> |         AI-SERVICE         |
+| Spring Cloud  |   /api/ai/classification |   Spring Boot + Spring AI  |
+|    :8080      |   /api/ai/resume         |          :8081             |
++---------------+                          |                            |
+   timeout 120s                            |  1. Validation entree      |
+   (routes /ai/**)                         |     @NotBlank @Size(8000)  |
+                                           |  2. CircuitBreaker         |
+                                           |     + TimeLimiter 15s      |
+                                           |  3. Prompt (versionne ici) |
+                                           +-------------+--------------+
+                                                         |
+                                        alias "gpt-fast" | cle virtuelle
+                                        (jamais un nom   | sk-... (quota
+                                         de provider)    |  0.001 USD)
+                                                         v
+                                           +----------------------------+
++----------+     comptage tokens,          |          LITELLM           |
+| POSTGRES |<----- cles, budgets --------- |        proxy :4000         |
+|  :5432   |                               |                            |
++----------+                               |  - verif cle + quota       |
+                                           |  - cache (hit? -> gratuit) |
++----------+     cache reponses 5 min,     |  - routage + retries x2    |
+|  REDIS   |<----- etat du routeur ------- |  - fallback pool           |
++----------+                               +-------------+--------------+
+                                                         |
+                                                         v
+                                    +---------------------------------------+
+                                    |              PROVIDERS                |
+                                    |  [ACTIF]    openai/gpt-4o-mini        |
+                                    |  [pret]     azure/gpt-4o-mini         |
+                                    |  [pret]     mistral/mistral-small     |
+                                    +---------------------------------------+
+
+ Reponses possibles :
+   Nominal    : 200 {"categorie":"FACTURATION"}          (normalise via enum)
+   SSE        : data: La  data: commande  data: 4512 ... (token par token)
+   Degrade    : 200 {"categorie":"AUTRE"}                (LiteLLM down / quota)
+
+ La 3e requete du dossier ("Classification directe", :8081 sans /ai)
+ contourne la Gateway : outil de diagnostic pour isoler une panne
+ (gateway vs ai-service). En prod, seul :8080 serait expose.
+```
+
+Sequence d'un appel de classification :
+
+```
+ Client        Gateway        ai-service         LiteLLM          OpenAI
+   |              |                |                 |               |
+   |--- POST ---->|                |                 |               |
+   |              |-- StripPrefix->|                 |               |
+   |              |                |-- validation    |               |
+   |              |                |-- gpt-fast ---->|               |
+   |              |                |                 |-- quota OK ?  |
+   |              |                |                 |-- cache miss  |
+   |              |                |                 |---- appel --->|
+   |              |                |                 |<-- reponse ---|
+   |              |                |<-- contenu -----|  (+ spend $)  |
+   |              |                |-- normalise     |               |
+   |              |<-- 200 JSON ---|   -> enum       |               |
+   |<--- 200 -----|                |                 |               |
+   |              |                |                 |               |
+   |         (si LiteLLM down / quota depasse :)     |               |
+   |              |                |-- X echec ----->|               |
+   |              |<-- 200 AUTRE --|  (fallback CB)  |               |
+```
+
+### Dossier 4 — Validation : les entrees invalides sont rejetees AVANT le LLM
+
+```
+ Postman --> Gateway --> ai-service (Bean Validation)
+                            |
+                            |-- texte vide       --> 400 {"code":"VALIDATION",
+                            |                             "details":["texte : ..."]}
+                            |-- texte > 8000 c.  --> 400 {"code":"VALIDATION", ...}
+                            |
+                            X  jamais transmis a LiteLLM : zero token, zero cout.
+```
+
 ## Lancement manuel, etape par etape
 
 <details>
