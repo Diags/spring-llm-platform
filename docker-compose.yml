@@ -42,6 +42,7 @@ services:
       DATABASE_URL: postgresql://litellm:${POSTGRES_PASSWORD:-litellm}@postgres:5432/litellm
       REDIS_HOST: redis
       REDIS_PORT: "6379"
+      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
       AZURE_API_KEY: ${AZURE_API_KEY:-}
       AZURE_API_BASE: ${AZURE_API_BASE:-}
       MISTRAL_API_KEY: ${MISTRAL_API_KEY:-}

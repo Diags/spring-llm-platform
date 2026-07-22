@@ -8,22 +8,30 @@ model_list:
   # ---- alias "gpt-fast" : taches courantes (resume, classification) ----
   - model_name: gpt-fast
     litellm_params:
-      model: azure/gpt-4o-mini
-      api_base: os.environ/AZURE_API_BASE
-      api_key: os.environ/AZURE_API_KEY
+      model: openai/gpt-4o-mini
+      api_key: os.environ/OPENAI_API_KEY
 
-  # meme alias => membre du pool de fallback de gpt-fast
-  - model_name: gpt-fast
-    litellm_params:
-      model: mistral/mistral-small-latest
-      api_key: os.environ/MISTRAL_API_KEY
+  # ---- AZURE, pret a activer : remplir AZURE_API_KEY + AZURE_API_BASE
+  # dans le .env puis decommenter ce bloc (meme alias => rejoint le pool
+  # de fallback de gpt-fast, aucun changement Java). Ne PAS decommenter
+  # avec des cles vides : le routeur enverrait des requetes vouees a l'echec.
+  # - model_name: gpt-fast
+  #   litellm_params:
+  #     model: azure/gpt-4o-mini
+  #     api_base: os.environ/AZURE_API_BASE
+  #     api_key: os.environ/AZURE_API_KEY
+
+  # ---- MISTRAL, pret a activer : remplir MISTRAL_API_KEY puis decommenter
+  # - model_name: gpt-fast
+  #   litellm_params:
+  #     model: mistral/mistral-small-latest
+  #     api_key: os.environ/MISTRAL_API_KEY
 
   # ---- alias "gpt-smart" : taches complexes (raisonnement, redaction) ----
   - model_name: gpt-smart
     litellm_params:
-      model: azure/gpt-4o
-      api_base: os.environ/AZURE_API_BASE
-      api_key: os.environ/AZURE_API_KEY
+      model: openai/gpt-4o
+      api_key: os.environ/OPENAI_API_KEY
 
 router_settings:
   routing_strategy: usage-based-routing-v2
